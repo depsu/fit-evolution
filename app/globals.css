@@ -1,0 +1,272 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-ink: #0a0a0a;
+  --color-coal: #151515;
+  --color-graphite: #1f1f1f;
+  --color-blood: #e10600;
+  --color-ember: #ff2e1f;
+  --color-chalk: #f2efe9;
+  --color-steel: #9a9a94;
+  --font-display: var(--font-anton), sans-serif;
+  --font-body: var(--font-archivo), sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--color-ink);
+  color: var(--color-chalk);
+  font-family: var(--font-body);
+}
+
+::selection {
+  background: var(--color-blood);
+  color: var(--color-chalk);
+}
+
+/* Accesibilidad: foco visible bien marcado al navegar con teclado */
+:focus-visible {
+  outline: 3px solid var(--color-ember);
+  outline-offset: 2px;
+}
+
+/* Accesibilidad: sin animaciones para quien prefiere menos movimiento */
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track,
+  .rise,
+  .livedot,
+  .fillbar,
+  .pop,
+  .tour-backdrop,
+  .tour-card,
+  .tour-swap,
+  .tour-icon {
+    animation: none !important;
+  }
+  .rise {
+    opacity: 1;
+  }
+  [data-reveal],
+  [data-reveal].revealed {
+    opacity: 1;
+    animation: none !important;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* Textura de grano sutil sobre todo el fondo */
+.grain::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+}
+
+/* Franjas diagonales de peligro (rojo/negro) */
+.hazard {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--color-blood) 0 14px,
+    var(--color-ink) 14px 28px
+  );
+}
+
+.hazard-thin {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--color-blood) 0 6px,
+    transparent 6px 12px
+  );
+}
+
+/* Marquesina infinita */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.marquee-track {
+  animation: marquee 22s linear infinite;
+}
+
+/* Entrada escalonada al cargar */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rise {
+  opacity: 0;
+  animation: rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Pulso del punto "en vivo" */
+@keyframes livepulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(225, 6, 0, 0.7);
+  }
+  60% {
+    box-shadow: 0 0 0 9px rgba(225, 6, 0, 0);
+  }
+}
+
+.livedot {
+  animation: livepulse 1.8s ease-out infinite;
+}
+
+/* Barra de progreso animada */
+@keyframes fillbar {
+  from {
+    width: 0;
+  }
+}
+
+.fillbar {
+  animation: fillbar 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Contorno de texto (titulares fantasma) */
+.text-outline {
+  -webkit-text-stroke: 1.5px rgba(242, 239, 233, 0.22);
+  color: transparent;
+}
+
+.text-outline-blood {
+  -webkit-text-stroke: 1.5px rgba(225, 6, 0, 0.55);
+  color: transparent;
+}
+
+/* Revelado al hacer scroll: los elementos con data-reveal aparecen
+   suavemente cuando entran en pantalla (los activa reveal-on-scroll.tsx) */
+[data-reveal] {
+  opacity: 0;
+}
+
+[data-reveal].revealed {
+  animation: rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--reveal-delay, 0s);
+}
+
+/* Pop de celebración al marcar un ejercicio como hecho */
+@keyframes pop {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.14);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.pop {
+  animation: pop 0.35s ease-out;
+}
+
+/* Guía de bienvenida */
+@keyframes tourfade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes tourcard {
+  from {
+    opacity: 0;
+    transform: translateY(36px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes tourswap {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes touricon {
+  0% {
+    transform: scale(0.6) rotate(-8deg);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.1) rotate(2deg);
+  }
+  100% {
+    transform: scale(1) rotate(0);
+    opacity: 1;
+  }
+}
+
+.tour-backdrop {
+  animation: tourfade 0.3s ease-out both;
+}
+
+.tour-card {
+  animation: tourcard 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.tour-swap {
+  animation: tourswap 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.tour-icon {
+  animation: touricon 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Foco de la guía: la sección explicada queda iluminada
+   y el resto de la página se oscurece */
+.guide-target {
+  position: relative;
+  z-index: 75;
+  outline: 3px solid var(--color-ember);
+  outline-offset: 4px;
+  box-shadow: 0 0 0 9999px rgba(10, 10, 10, 0.8);
+  scroll-margin: 90px;
+}
+
+/* Scrollbar acorde */
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-ink);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-graphite);
+  border-radius: 0;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-blood);
+}
