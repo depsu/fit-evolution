@@ -70,6 +70,10 @@ export interface StoredClient {
     // Próxima clase juntos: 0 = lunes … 6 = domingo, null = por agendar
     nextDay: number | null;
   };
+  // Teléfono (WhatsApp) para enviarle su enlace de acceso
+  phone?: string;
+  // false = el coach lo creó y el cliente aún no completa su ficha
+  profileDone?: boolean;
   // Ficha física (opcional)
   heightCm?: number;
   weightKg?: number;

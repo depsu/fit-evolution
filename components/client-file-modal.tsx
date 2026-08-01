@@ -32,6 +32,14 @@ export function ClientFileModal({
       ? `${window.location.origin}${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/entrar?code=${client.code}`
       : "";
 
+  // Enlace de WhatsApp con el mensaje de bienvenida listo para enviar
+  const phoneDigits = (client.phone ?? "").replace(/[^0-9]/g, "");
+  const whatsappLink = phoneDigits
+    ? `https://wa.me/${phoneDigits}?text=${encodeURIComponent(
+        `¡Hola ${client.name.split(" ")[0]}! 💪 Soy tu coach de FIT EVOLUTION. Entra aquí con tu código ${client.code} y crea tu ficha para partir con tus rutinas: ${accessLink}`
+      )}`
+    : null;
+
   const copyLink = async () => {
     try {
       await navigator.clipboard.writeText(accessLink);
@@ -93,6 +101,10 @@ export function ClientFileModal({
               { label: "Nivel", value: client.level },
               { label: "Entrena como", value: client.sex },
               { label: "Objetivo", value: client.goal },
+              {
+                label: "Teléfono",
+                value: client.phone ?? "sin registrar",
+              },
               {
                 label: "Altura",
                 value: client.heightCm ? `${client.heightCm} cm` : "sin registrar",
@@ -218,6 +230,16 @@ export function ClientFileModal({
                   {client.code}
                 </p>
                 <p className="mt-1 truncate text-xs text-steel">{accessLink}</p>
+                {whatsappLink && (
+                  <a
+                    href={whatsappLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 mr-2 inline-block border border-blood bg-blood px-3 py-1.5 text-xs font-semibold tracking-widest text-chalk uppercase transition-colors hover:bg-ember"
+                  >
+                    📲 Enviar enlace por WhatsApp
+                  </a>
+                )}
                 <button
                   type="button"
                   onClick={copyLink}
@@ -232,8 +254,9 @@ export function ClientFileModal({
               </div>
             </div>
             <p className="mt-2 text-xs text-steel">
-              Escanea el QR o abre el link: llega directo a entrar con el
-              código puesto.
+              {client.profileDone === false
+                ? "El cliente abre el enlace, entra con su código y crea su propia ficha — ahí le aparecen tus rutinas."
+                : "Escanea el QR o abre el link: llega directo a entrar con el código puesto."}
             </p>
           </div>
         </div>

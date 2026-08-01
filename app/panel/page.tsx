@@ -72,7 +72,7 @@ const PANEL_GUIDE: GuideStep[] = [
     icon: "📇",
     title: "La lista:",
     highlight: "tus clientes",
-    text: "Toca un nombre para abrir su ficha. El porcentaje rojo es cuánto lleva de sus rutinas. Con “+ Nuevo” creas un cliente (ahí defines su nivel, una sola vez) y la app te da su código de acceso.",
+    text: "Toca un nombre para abrir su ficha. Con “+ Nuevo” creas un cliente con su código y su teléfono, y le envías el enlace por WhatsApp: el cliente completa su propia ficha al entrar y ahí le aparecen tus ejercicios.",
     targetId: "guia-clientes",
   },
   {
@@ -283,19 +283,15 @@ export default function PanelPage() {
     showToast("Rutina quitada");
   };
 
+  // Alta rápida: el coach pone nombre, código y teléfono; el cliente
+  // completa su propia ficha al entrar con el enlace
   const addClient = (data: {
     name: string;
-    goal: string;
-    sex: Sex;
-    level: Level;
-    plan: StoredClient["plan"];
-    group: MuscleGroup;
-    heightCm?: number;
-    weightKg?: number;
     customCode?: string;
+    phone?: string;
+    plan: StoredClient["plan"];
     packTotal?: number;
   }) => {
-    // Si el coach eligió un código (apodo), se usa; si está tomado, se avisa
     const normalized = (data.customCode ?? "")
       .toUpperCase()
       .normalize("NFD")
@@ -311,34 +307,25 @@ export default function PanelPage() {
       id: `c${Date.now()}`,
       name: data.name.trim(),
       code,
+      phone: data.phone?.trim() || undefined,
+      profileDone: false,
       plan: data.plan,
-      level: data.level,
-      sex: data.sex,
-      goal: data.goal.trim() || "Ponerse en forma",
+      // Valores de partida: el cliente los define al crear su ficha
+      level: "principiante",
+      sex: "hombre",
+      goal: "",
       sessionsPack:
         data.packTotal && data.packTotal > 0
           ? { total: data.packTotal, used: 0, nextDay: null }
           : undefined,
-      heightCm: data.heightCm,
-      weightKg: data.weightKg,
-      weightHistory: data.weightKg
-        ? [{ dateLabel: todayISO(), weightKg: data.weightKg }]
-        : [],
+      weightHistory: [],
       week: [false, false, false, false, false, false, false],
-      routines: [
-        {
-          id: `r${Date.now()}`,
-          routine: buildRoutine(data.group, data.level, data.sex),
-          done: [],
-          timesDone: 0,
-          adjustments: [
-            { dateLabel: todayISO(), by: "coach", text: "Creó la rutina" },
-          ],
-        },
-      ],
+      // Sin rutinas: la primera se crea sola cuando complete su ficha
+      routines: [],
       history: [],
       pastWeeks: [],
       lastSeen: "nunca",
+      weekStartDate: undefined,
     };
     const updated = [...clients, client];
     persist(updated);
@@ -346,26 +333,6 @@ export default function PanelPage() {
     setMode("detalle");
     setFileOpen(true);
     showToast(`${client.name.split(" ")[0]} creado · código ${code}`);
-  };
-
-  // El coach actualiza el peso del cliente desde su ficha
-  const updateWeight = (weightKg: number) => {
-    if (!selected) return;
-    persist(
-      clients.map((client) =>
-        client.id === selected.id
-          ? {
-              ...client,
-              weightKg,
-              weightHistory: [
-                ...client.weightHistory,
-                { dateLabel: todayISO(), weightKg },
-              ],
-            }
-          : client
-      )
-    );
-    showToast("Peso actualizado ✓");
   };
 
   const updateCoach = (settings: CoachSettings) => {
@@ -390,6 +357,26 @@ export default function PanelPage() {
           : client
       )
     );
+  };
+
+  // El coach actualiza el peso del cliente desde su ficha
+  const updateWeight = (weightKg: number) => {
+    if (!selected) return;
+    persist(
+      clients.map((client) =>
+        client.id === selected.id
+          ? {
+              ...client,
+              weightKg,
+              weightHistory: [
+                ...client.weightHistory,
+                { dateLabel: todayISO(), weightKg },
+              ],
+            }
+          : client
+      )
+    );
+    showToast("Peso actualizado ✓");
   };
 
   const exit = () => {
@@ -603,6 +590,12 @@ export default function PanelPage() {
                   <p className="mt-1 text-sm text-steel">
                     {selected.plan} · nivel {selected.level} · objetivo: {selected.goal}
                   </p>
+                  {selected.profileDone === false && (
+                    <p className="mt-2 border-l-2 border-blood bg-ink px-3 py-2 text-sm text-steel">
+                      📝 Aún no crea su ficha — envíale su enlace por WhatsApp
+                      desde “Ver ficha”.
+                    </p>
+                  )}
                   <p className="mt-2 inline-flex items-center gap-2 border border-graphite px-3 py-1 text-sm">
                     <span className="text-xs tracking-widest text-steel uppercase">
                       Código de acceso
@@ -2106,27 +2099,17 @@ function NewClientForm({
 }: {
   onCreate: (data: {
     name: string;
-    goal: string;
-    sex: Sex;
-    level: Level;
-    plan: StoredClient["plan"];
-    group: MuscleGroup;
-    heightCm?: number;
-    weightKg?: number;
     customCode?: string;
+    phone?: string;
+    plan: StoredClient["plan"];
     packTotal?: number;
   }) => void;
 }) {
   const [name, setName] = useState("");
-  const [goal, setGoal] = useState("");
-  const [height, setHeight] = useState("");
-  const [weight, setWeight] = useState("");
   const [customCode, setCustomCode] = useState("");
-  const [packTotal, setPackTotal] = useState("");
-  const [sex, setSex] = useState<Sex>("mujer");
-  const [level, setLevel] = useState<Level>("principiante");
+  const [phone, setPhone] = useState("");
   const [plan, setPlan] = useState<StoredClient["plan"]>("Mensual");
-  const [group, setGroup] = useState<MuscleGroup>("full-body");
+  const [packTotal, setPackTotal] = useState("");
   const [error, setError] = useState(false);
 
   const chip = (isActive: boolean) =>
@@ -2142,8 +2125,8 @@ function NewClientForm({
         Nuevo <span className="text-blood">cliente</span>
       </h2>
       <p className="mt-1 text-sm text-steel">
-        Esta es su ficha: el nivel se define una sola vez aquí. Al crearlo se
-        genera su código de acceso — dáselo y ya puede entrar desde el celular.
+        Solo lo básico: al crearlo le envías su enlace por WhatsApp y el
+        cliente completa su propia ficha (objetivo, nivel, peso…) al entrar.
       </p>
 
       <label
@@ -2169,21 +2152,6 @@ function NewClientForm({
       )}
 
       <label
-        htmlFor="objetivo"
-        className="mt-4 block text-xs font-semibold tracking-[0.3em] text-steel uppercase"
-      >
-        Objetivo
-      </label>
-      <input
-        id="objetivo"
-        value={goal}
-        onChange={(event) => setGoal(event.target.value)}
-        placeholder="Ej: bajar de peso, ganar músculo…"
-        className="mt-2 w-full border border-graphite bg-ink px-4 py-3 text-chalk placeholder:text-steel/50 focus:border-chalk/50 focus:outline-none"
-      />
-
-      {/* Código elegible: apodo o lo que el cliente quiera */}
-      <label
         htmlFor="codigo-acceso"
         className="mt-4 block text-xs font-semibold tracking-[0.3em] text-steel uppercase"
       >
@@ -2193,78 +2161,27 @@ function NewClientForm({
         id="codigo-acceso"
         value={customCode}
         onChange={(event) => setCustomCode(event.target.value.toUpperCase())}
-        placeholder="Ej: su apodo — si lo dejas vacío, se genera solo"
+        placeholder="Su apodo — vacío = se genera solo"
         className="mt-2 w-full border border-graphite bg-ink px-4 py-3 font-display text-xl tracking-widest text-chalk uppercase placeholder:font-body placeholder:text-sm placeholder:tracking-normal placeholder:text-steel/50 focus:border-chalk/50 focus:outline-none"
       />
 
-      {/* Ficha física: siempre opcional */}
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <label className="flex flex-col gap-1 text-xs font-semibold tracking-[0.3em] text-steel uppercase">
-          Altura (opcional)
-          <input
-            inputMode="numeric"
-            value={height}
-            onChange={(event) => setHeight(event.target.value)}
-            placeholder="ej: 172 cm"
-            className="border border-graphite bg-ink px-3 py-2.5 font-normal tracking-normal text-chalk normal-case placeholder:text-steel/40 focus:border-chalk/50 focus:outline-none"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-xs font-semibold tracking-[0.3em] text-steel uppercase">
-          Peso (opcional)
-          <input
-            inputMode="decimal"
-            value={weight}
-            onChange={(event) => setWeight(event.target.value)}
-            placeholder="ej: 74.5 kg"
-            className="border border-graphite bg-ink px-3 py-2.5 font-normal tracking-normal text-chalk normal-case placeholder:text-steel/40 focus:border-chalk/50 focus:outline-none"
-          />
-        </label>
-      </div>
-
-      <p className="mt-4 text-xs font-semibold tracking-[0.3em] text-steel uppercase">
-        Entrena como
-      </p>
-      <div className="mt-2 flex gap-2">
-        <button type="button" onClick={() => setSex("mujer")} className={chip(sex === "mujer")}>
-          Mujer
-        </button>
-        <button type="button" onClick={() => setSex("hombre")} className={chip(sex === "hombre")}>
-          Hombre
-        </button>
-      </div>
-
-      <p className="mt-4 text-xs font-semibold tracking-[0.3em] text-steel uppercase">
-        Nivel (se pregunta una sola vez)
-      </p>
-      <div className="mt-2 flex flex-wrap gap-2">
-        {LEVEL_OPTIONS.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => setLevel(option.value)}
-            className={chip(level === option.value)}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-
       <label
-        htmlFor="pack-clases"
+        htmlFor="telefono"
         className="mt-4 block text-xs font-semibold tracking-[0.3em] text-steel uppercase"
       >
-        Clases personales contratadas (opcional)
+        Teléfono (WhatsApp)
       </label>
       <input
-        id="pack-clases"
-        type="number"
-        min={0}
-        max={50}
-        value={packTotal}
-        onChange={(event) => setPackTotal(event.target.value)}
-        placeholder="Ej: 4 (si pagó un pack de clases contigo)"
+        id="telefono"
+        inputMode="tel"
+        value={phone}
+        onChange={(event) => setPhone(event.target.value)}
+        placeholder="Ej: +56 9 1234 5678"
         className="mt-2 w-full border border-graphite bg-ink px-4 py-3 text-chalk placeholder:text-steel/50 focus:border-chalk/50 focus:outline-none"
       />
+      <p className="mt-1 text-xs text-steel">
+        Con esto te aparece el botón “Enviar enlace por WhatsApp”.
+      </p>
 
       <p className="mt-4 text-xs font-semibold tracking-[0.3em] text-steel uppercase">
         Plan
@@ -2282,21 +2199,22 @@ function NewClientForm({
         ))}
       </div>
 
-      <p className="mt-4 text-xs font-semibold tracking-[0.3em] text-steel uppercase">
-        Primera rutina
-      </p>
-      <div className="mt-2 flex flex-wrap gap-2">
-        {GROUP_OPTIONS.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => setGroup(option.value)}
-            className={chip(group === option.value)}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
+      <label
+        htmlFor="pack-clases"
+        className="mt-4 block text-xs font-semibold tracking-[0.3em] text-steel uppercase"
+      >
+        Clases personales contratadas (opcional)
+      </label>
+      <input
+        id="pack-clases"
+        type="number"
+        min={0}
+        max={50}
+        value={packTotal}
+        onChange={(event) => setPackTotal(event.target.value)}
+        placeholder="Ej: 4"
+        className="mt-2 w-full border border-graphite bg-ink px-4 py-3 text-chalk placeholder:text-steel/50 focus:border-chalk/50 focus:outline-none"
+      />
 
       <button
         type="button"
@@ -2307,14 +2225,9 @@ function NewClientForm({
           }
           onCreate({
             name,
-            goal,
-            sex,
-            level,
-            plan,
-            group,
-            heightCm: Number(height.replace(/[^0-9.]/g, "")) || undefined,
-            weightKg: Number(weight.replace(/[^0-9.,]/g, "").replace(",", ".")) || undefined,
             customCode: customCode || undefined,
+            phone: phone || undefined,
+            plan,
             packTotal: Number(packTotal) || undefined,
           });
         }}
@@ -2325,3 +2238,4 @@ function NewClientForm({
     </div>
   );
 }
+

@@ -9,7 +9,17 @@ import { ClientFileModal } from "@/components/client-file-modal";
 import { PlanDayModal } from "@/components/plan-day-modal";
 import { MediaModal } from "@/components/media-modal";
 import { EditRoutineModal } from "@/components/edit-routine-modal";
-import { DAY_NAMES, iconForRoutine, type Routine, type RoutineItem } from "@/lib/routine";
+import {
+  buildRoutine,
+  DAY_NAMES,
+  iconForRoutine,
+  LEVEL_OPTIONS,
+  SEX_OPTIONS,
+  type Level,
+  type Routine,
+  type RoutineItem,
+  type Sex,
+} from "@/lib/routine";
 import { useEscape } from "@/lib/use-escape";
 import {
   getCoachSettings,
@@ -405,6 +415,52 @@ export default function MiRutinaPage() {
     setActiveRoutineId(routines[0]?.id ?? null);
   };
 
+  // El cliente completa su ficha por primera vez: con eso se crea
+  // su primera rutina y le aparecen los ejercicios
+  const completeProfile = (data: {
+    goal: string;
+    sex: Sex;
+    level: Level;
+    heightCm?: number;
+    weightKg?: number;
+  }) => {
+    if (!client) return;
+    const firstRoutine =
+      client.routines.length > 0
+        ? client.routines
+        : [
+            {
+              id: `r${Date.now()}`,
+              createdBy: "coach" as const,
+              routine: buildRoutine("full-body", data.level, data.sex),
+              done: [],
+              timesDone: 0,
+              adjustments: [
+                {
+                  dateLabel: todayISO(),
+                  by: "coach" as const,
+                  text: "Primera rutina creada según tu ficha",
+                },
+              ],
+            },
+          ];
+    const updated: StoredClient = {
+      ...client,
+      goal: data.goal.trim() || "Ponerse en forma",
+      sex: data.sex,
+      level: data.level,
+      heightCm: data.heightCm,
+      weightKg: data.weightKg,
+      weightHistory: data.weightKg
+        ? [...client.weightHistory, { dateLabel: todayISO(), weightKg: data.weightKg }]
+        : client.weightHistory,
+      profileDone: true,
+      routines: firstRoutine,
+    };
+    persist(updated);
+    setActiveRoutineId(routineForToday(updated)?.id ?? null);
+  };
+
   const exit = () => {
     logout();
     router.push("/");
@@ -420,6 +476,17 @@ export default function MiRutinaPage() {
   }
 
   const firstName = client.name.split(" ")[0];
+
+  // Recién llegó con el enlace del coach: primero crea su ficha
+  if (client.profileDone === false) {
+    return (
+      <main className="min-h-screen">
+        <SiteNav active="mi-rutina" />
+        <WelcomeProfileForm name={firstName} onDone={completeProfile} />
+      </main>
+    );
+  }
+
   const total = active?.routine.items.length ?? 0;
   const completed = active
     ? active.routine.items.filter((item) => active.done.includes(item.exercise.id))
@@ -1033,5 +1100,136 @@ export default function MiRutinaPage() {
         />
       )}
     </main>
+  );
+}
+
+// Ficha inicial del cliente: la completa una sola vez al llegar
+// con el enlace que le envió el coach
+function WelcomeProfileForm({
+  name,
+  onDone,
+}: {
+  name: string;
+  onDone: (data: {
+    goal: string;
+    sex: Sex;
+    level: Level;
+    heightCm?: number;
+    weightKg?: number;
+  }) => void;
+}) {
+  const [goal, setGoal] = useState("");
+  const [sex, setSex] = useState<Sex>("mujer");
+  const [level, setLevel] = useState<Level>("principiante");
+  const [height, setHeight] = useState("");
+  const [weight, setWeight] = useState("");
+
+  const chip = (isActive: boolean) =>
+    `border px-4 py-2.5 text-sm font-semibold transition-colors ${
+      isActive
+        ? "border-blood bg-blood text-chalk"
+        : "border-graphite hover:border-blood"
+    }`;
+
+  return (
+    <div className="mx-auto max-w-md px-4 py-12 sm:px-6">
+      <p className="text-xs font-semibold tracking-[0.3em] text-steel uppercase">
+        ¡Bienvenido a FIT EVOLUTION!
+      </p>
+      <h1 className="font-display mt-2 text-4xl tracking-wide uppercase sm:text-5xl">
+        Hola, <span className="text-blood">{name}</span> 👋
+      </h1>
+      <p className="mt-3 text-steel">
+        Crea tu ficha (es una sola vez) y al terminar te aparecerán tus
+        rutinas y los ejercicios de tu coach.
+      </p>
+
+      <label
+        htmlFor="objetivo"
+        className="mt-8 block text-xs font-semibold tracking-[0.3em] text-steel uppercase"
+      >
+        ¿Cuál es tu objetivo?
+      </label>
+      <input
+        id="objetivo"
+        value={goal}
+        onChange={(event) => setGoal(event.target.value)}
+        placeholder="Ej: bajar de peso, ganar músculo…"
+        className="mt-2 w-full border border-graphite bg-coal px-4 py-3 text-chalk placeholder:text-steel/50 focus:border-chalk/50 focus:outline-none"
+      />
+
+      <p className="mt-5 text-xs font-semibold tracking-[0.3em] text-steel uppercase">
+        Entrenas como
+      </p>
+      <div className="mt-2 flex gap-2">
+        {SEX_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => setSex(option.value)}
+            className={chip(sex === option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
+      <p className="mt-5 text-xs font-semibold tracking-[0.3em] text-steel uppercase">
+        Tu nivel
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {LEVEL_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => setLevel(option.value)}
+            className={chip(level === option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-3">
+        <label className="flex flex-col gap-1 text-xs font-semibold tracking-[0.3em] text-steel uppercase">
+          Altura (opcional)
+          <input
+            inputMode="numeric"
+            value={height}
+            onChange={(event) => setHeight(event.target.value)}
+            placeholder="ej: 172"
+            className="border border-graphite bg-coal px-3 py-2.5 font-normal tracking-normal text-chalk normal-case placeholder:text-steel/40 focus:border-chalk/50 focus:outline-none"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-semibold tracking-[0.3em] text-steel uppercase">
+          Peso (opcional)
+          <input
+            inputMode="decimal"
+            value={weight}
+            onChange={(event) => setWeight(event.target.value)}
+            placeholder="ej: 74.5"
+            className="border border-graphite bg-coal px-3 py-2.5 font-normal tracking-normal text-chalk normal-case placeholder:text-steel/40 focus:border-chalk/50 focus:outline-none"
+          />
+        </label>
+      </div>
+
+      <button
+        type="button"
+        onClick={() =>
+          onDone({
+            goal,
+            sex,
+            level,
+            heightCm: Number(height.replace(/[^0-9.]/g, "")) || undefined,
+            weightKg:
+              Number(weight.replace(/[^0-9.,]/g, "").replace(",", ".")) ||
+              undefined,
+          })
+        }
+        className="mt-8 w-full bg-blood py-4 font-display text-xl tracking-wider text-chalk uppercase transition-colors hover:bg-ember"
+      >
+        Crear mi ficha y ver mis rutinas →
+      </button>
+    </div>
   );
 }
