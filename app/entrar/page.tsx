@@ -9,6 +9,7 @@ import {
   getSession,
   loadClients,
   loginWithCode,
+  pullRemote,
   type StoredClient,
 } from "@/lib/store";
 
@@ -21,6 +22,8 @@ export default function EntrarPage() {
   const [activeCode, setActiveCode] = useState<string | null>(null);
 
   useEffect(() => {
+    // Baja lo último de la nube antes de mostrar los códigos
+    void pullRemote().then(() => setClients(loadClients()));
     const stored = loadClients();
     setClients(stored);
 
@@ -53,8 +56,14 @@ export default function EntrarPage() {
       : `Entrar a mi rutina como ${match.client.name.split(" ")[0]} →`
     : "Entrar →";
 
-  const submit = () => {
-    const session = loginWithCode(code);
+  const submit = async () => {
+    let session = loginWithCode(code);
+    if (!session) {
+      // Puede ser un cliente recién creado en otro teléfono: baja la nube y reintenta
+      await pullRemote();
+      setClients(loadClients());
+      session = loginWithCode(code);
+    }
     if (!session) {
       setError(true);
       return;
@@ -87,7 +96,7 @@ export default function EntrarPage() {
           className="mt-8"
           onSubmit={(event) => {
             event.preventDefault();
-            submit();
+            void submit();
           }}
         >
           <label

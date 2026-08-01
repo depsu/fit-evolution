@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { SiteNav } from "@/components/site-nav";
 import { GuideTour, type GuideStep } from "@/components/guide-tour";
+import { MediaModal } from "@/components/media-modal";
 import { WeekHistoryModal } from "@/components/week-history-modal";
 import { ClientFileModal } from "@/components/client-file-modal";
 import {
@@ -30,16 +31,21 @@ import {
   formatDateLabel,
   generateCode,
   getCoachSettings,
+  getMedia,
   saveCoachSettings,
+  saveMedia,
   type CoachSettings,
   getSession,
   lastDoneLabel,
   loadClients,
   logout,
+  mediaKind,
+  pullRemote,
   routineForToday,
   saveClients,
   todayISO,
   type DayLog,
+  type MediaMap,
   type SavedRoutine,
   type StoredClient,
 } from "@/lib/store";
@@ -85,6 +91,12 @@ const PANEL_GUIDE: GuideStep[] = [
     placement: "top",
   },
   {
+    icon: "📚",
+    title: "La",
+    highlight: "biblioteca",
+    text: "Todos los ejercicios ordenados por parte del cuerpo. A cada uno le puedes pegar el link de una foto o video (YouTube sirve) y se ve qué elemento necesita: máquina, pesas o el cuerpo. Tus clientes verán ese video en su rutina.",
+  },
+  {
     icon: "✏️",
     title: "Botón",
     highlight: "nueva rutina",
@@ -98,7 +110,10 @@ export default function PanelPage() {
   const [authorized, setAuthorized] = useState(false);
   const [clients, setClients] = useState<StoredClient[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
-  const [mode, setMode] = useState<"detalle" | "asignar" | "nuevo">("detalle");
+  const [mode, setMode] = useState<"detalle" | "asignar" | "nuevo" | "biblioteca">("detalle");
+  // Fotos/videos por ejercicio (los pone el coach en la Biblioteca)
+  const [media, setMedia] = useState<MediaMap>({});
+  const [mediaView, setMediaView] = useState<{ url: string; title: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   // Día tocado en la asistencia → modal con la rutina que hizo
   const [dayLog, setDayLog] = useState<{ dayIndex: number; log: DayLog | null } | null>(
@@ -119,6 +134,7 @@ export default function PanelPage() {
   useEscape(historyOpen, () => setHistoryOpen(false));
   useEscape(fileOpen, () => setFileOpen(false));
   useEscape(scheduleOpen, () => setScheduleOpen(false));
+  useEscape(!!mediaView, () => setMediaView(null));
 
   useEffect(() => {
     if (skipFirstScroll.current) {
@@ -137,11 +153,30 @@ export default function PanelPage() {
       router.replace("/entrar");
       return;
     }
-    const stored = loadClients();
-    setClients(stored);
-    setSelectedId(stored[0]?.id ?? "");
-    setCoach(getCoachSettings());
-    setAuthorized(true);
+    let alive = true;
+    (async () => {
+      // Primero la nube: así este teléfono ve lo último antes de mostrar nada
+      await pullRemote();
+      if (!alive) return;
+      const stored = loadClients();
+      setClients(stored);
+      setSelectedId(stored[0]?.id ?? "");
+      setCoach(getCoachSettings());
+      setMedia(getMedia());
+      setAuthorized(true);
+    })();
+    // Y cada pocos segundos, refresca si alguien más cambió algo
+    const timer = window.setInterval(async () => {
+      if (await pullRemote()) {
+        setClients(loadClients());
+        setCoach(getCoachSettings());
+        setMedia(getMedia());
+      }
+    }, 7000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
   }, [router]);
 
   const selected = useMemo(
@@ -405,6 +440,17 @@ export default function PanelPage() {
             </p>
             <button
               type="button"
+              onClick={() => setMode(mode === "biblioteca" ? "detalle" : "biblioteca")}
+              className={`border px-3 py-2 text-xs font-semibold tracking-widest uppercase transition-colors ${
+                mode === "biblioteca"
+                  ? "border-blood bg-blood text-chalk"
+                  : "border-graphite text-steel hover:border-blood hover:text-blood"
+              }`}
+            >
+              📚 Biblioteca
+            </button>
+            <button
+              type="button"
               onClick={() => setScheduleOpen(true)}
               className={`relative border px-3 py-2 text-xs font-semibold tracking-widest uppercase transition-colors ${
                 coach?.paused
@@ -525,7 +571,25 @@ export default function PanelPage() {
           {/* Columna derecha: detalle / nueva rutina / nuevo cliente.
               El div con ref permite bajar hasta aquí en móvil. */}
           <div ref={detailRef} className="min-w-0 scroll-mt-20">
-          {mode === "nuevo" ? (
+          {mode === "biblioteca" ? (
+            <section className="border border-graphite bg-coal p-6">
+              <LibrarySection
+                media={media}
+                onSave={(id, url) => {
+                  const next = { ...media };
+                  if (url.trim()) {
+                    next[id] = { url: url.trim() };
+                  } else {
+                    delete next[id];
+                  }
+                  setMedia(next);
+                  saveMedia(next);
+                  showToast(url.trim() ? "Medio guardado ✓" : "Medio quitado");
+                }}
+                onView={(url, title) => setMediaView({ url, title })}
+              />
+            </section>
+          ) : mode === "nuevo" ? (
             <section className="border border-graphite bg-coal p-6">
               <NewClientForm onCreate={addClient} />
             </section>
@@ -717,6 +781,8 @@ export default function PanelPage() {
               ) : (
                 <RoutinesSection
                   client={selected}
+                  media={media}
+                  onView={(url, title) => setMediaView({ url, title })}
                   onRemove={removeRoutine}
                   onEdit={editRoutine}
                 />
@@ -923,6 +989,14 @@ export default function PanelPage() {
         />
       )}
 
+      {mediaView && (
+        <MediaModal
+          url={mediaView.url}
+          title={mediaView.title}
+          onClose={() => setMediaView(null)}
+        />
+      )}
+
       {toast && (
         <div
           role="status"
@@ -940,10 +1014,14 @@ export default function PanelPage() {
 // última, edición directa y su historial de avances/ajustes
 function RoutinesSection({
   client,
+  media,
+  onView,
   onRemove,
   onEdit,
 }: {
   client: StoredClient;
+  media: MediaMap;
+  onView: (url: string, title: string) => void;
   onRemove: (routineId: string) => void;
   onEdit: (routineId: string, items: RoutineItem[], changes: string[]) => void;
 }) {
@@ -1099,6 +1177,18 @@ function RoutinesSection({
                                   ` · ${item.sets}×${item.reps}${item.weight ? ` · ${item.weight}` : ""} · ${item.restSeconds}s descanso`}
                               </span>
                             </span>
+                            {media[item.exercise.id] && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onView(media[item.exercise.id].url, item.exercise.name)
+                                }
+                                className="shrink-0 border border-blood px-2 py-1 text-xs font-semibold text-blood transition-colors hover:bg-blood hover:text-chalk"
+                                aria-label={`Ver cómo se hace ${item.exercise.name}`}
+                              >
+                                ▶ Ver
+                              </button>
+                            )}
                             <span className="hidden text-xs tracking-widest text-steel uppercase sm:block">
                               {item.exercise.muscle}
                             </span>
@@ -1271,6 +1361,142 @@ function RoutinesSection({
         </div>
       )}
     </div>
+  );
+}
+
+// Biblioteca: todos los ejercicios por parte del cuerpo, con su
+// elemento (máquina/pesas/cuerpo) y la foto o video que ponga el coach
+function LibrarySection({
+  media,
+  onSave,
+  onView,
+}: {
+  media: MediaMap;
+  onSave: (exerciseId: string, url: string) => void;
+  onView: (url: string, title: string) => void;
+}) {
+  return (
+    <div>
+      <h2 className="font-display text-3xl tracking-wide uppercase">
+        Biblioteca de <span className="text-blood">ejercicios</span>
+      </h2>
+      <p className="mt-1 text-sm text-steel">
+        Ordenados por parte del cuerpo. Pega el link de una foto o video
+        (YouTube sirve) y tus clientes lo verán en su rutina con “▶ Ver”.
+      </p>
+      {MOVEMENT_OPTIONS.map((movement) => {
+        const list = EXERCISES.filter(
+          (exercise) => exercise.movement === movement.value
+        );
+        if (list.length === 0) return null;
+        return (
+          <div key={movement.value} className="mt-6">
+            <h3 className="font-display border-b border-blood pb-1 text-xl tracking-wide uppercase">
+              {iconForRoutine(movement.label)} {movement.label}
+              <span className="ml-2 text-sm text-steel normal-case">
+                {list.length} ejercicios
+              </span>
+            </h3>
+            <ul className="mt-2 divide-y divide-graphite">
+              {list.map((exercise) => (
+                <MediaRow
+                  key={`${exercise.id}-${media[exercise.id]?.url ?? ""}`}
+                  exercise={exercise}
+                  current={media[exercise.id]?.url ?? ""}
+                  onSave={onSave}
+                  onView={onView}
+                />
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MediaRow({
+  exercise,
+  current,
+  onSave,
+  onView,
+}: {
+  exercise: Exercise;
+  current: string;
+  onSave: (exerciseId: string, url: string) => void;
+  onView: (url: string, title: string) => void;
+}) {
+  const [url, setUrl] = useState(current);
+  const equipmentLabel =
+    exercise.equipment === "pesas"
+      ? "Pesas"
+      : exercise.equipment === "cuerpo"
+        ? "Cuerpo"
+        : "Máquina";
+
+  return (
+    <li className="py-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="min-w-0 flex-1">
+          <span className="block font-semibold">{exercise.name}</span>
+          <span className="block text-xs text-steel">
+            {exercise.muscle} · necesita:{" "}
+            <strong className="text-chalk/80">
+              {equipmentLabel} — {exercise.machine}
+            </strong>
+          </span>
+        </span>
+        {current && (
+          <>
+            {mediaKind(current) === "image" && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={current}
+                alt=""
+                aria-hidden
+                className="size-10 border border-graphite object-cover"
+              />
+            )}
+            <button
+              type="button"
+              onClick={() => onView(current, exercise.name)}
+              className="border border-blood px-2 py-1 text-xs font-semibold text-blood transition-colors hover:bg-blood hover:text-chalk"
+            >
+              ▶ Ver
+            </button>
+          </>
+        )}
+      </div>
+      <div className="mt-2 flex gap-2">
+        <input
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          placeholder="Pega el link de la foto o video (YouTube, .jpg, .mp4…)"
+          aria-label={`Foto o video para ${exercise.name}`}
+          className="min-w-0 flex-1 border border-graphite bg-ink px-3 py-2 text-sm text-chalk placeholder:text-steel/50 focus:border-chalk/50 focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={() => onSave(exercise.id, url)}
+          className="border border-graphite px-3 py-2 text-xs font-semibold tracking-widest text-steel uppercase transition-colors hover:border-blood hover:text-blood"
+        >
+          {current ? "Actualizar" : "Guardar"}
+        </button>
+        {current && (
+          <button
+            type="button"
+            onClick={() => {
+              setUrl("");
+              onSave(exercise.id, "");
+            }}
+            className="px-2 py-2 text-xs font-semibold tracking-widest text-steel uppercase transition-colors hover:text-blood"
+            aria-label={`Quitar el medio de ${exercise.name}`}
+          >
+            ✕
+          </button>
+        )}
+      </div>
+    </li>
   );
 }
 

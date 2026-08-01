@@ -7,12 +7,16 @@ import { MachinePhoto } from "@/components/machine-photo";
 import { WeekHistoryModal } from "@/components/week-history-modal";
 import { ClientFileModal } from "@/components/client-file-modal";
 import { PlanDayModal } from "@/components/plan-day-modal";
+import { MediaModal } from "@/components/media-modal";
 import { DAY_NAMES, iconForRoutine, type Routine } from "@/lib/routine";
 import { useEscape } from "@/lib/use-escape";
 import {
   getCoachSettings,
+  getMedia,
   getSession,
   loadClients,
+  mediaKind,
+  pullRemote,
   type CoachSettings,
   logout,
   mondayISO,
@@ -21,6 +25,7 @@ import {
   todayIndex,
   todayISO,
   type DayLog,
+  type MediaMap,
   type StoredClient,
 } from "@/lib/store";
 
@@ -50,20 +55,38 @@ export default function MiRutinaPage() {
   const [routineFilter, setRoutineFilter] = useState<"todas" | "coach" | "propias">("todas");
   // Recordatorios (notificaciones del navegador)
   const [notify, setNotify] = useState(false);
+  // Fotos/videos de ejercicios (los pone el coach en su Biblioteca)
+  const [media, setMedia] = useState<MediaMap>({});
+  const [mediaView, setMediaView] = useState<{ url: string; title: string } | null>(null);
 
   // Cerrar modales con Escape
   useEscape(!!dayLog, () => setDayLog(null));
   useEscape(planDay !== null, () => setPlanDay(null));
+  useEscape(!!mediaView, () => setMediaView(null));
   useEscape(historyOpen, () => setHistoryOpen(false));
   useEscape(fileOpen, () => setFileOpen(false));
 
-  // Carga la sesión y el cliente al montar (localStorage solo existe en el navegador)
+  // Carga la sesión y el cliente al montar, bajando antes lo último de la nube
   useEffect(() => {
     const session = getSession();
     if (!session || session.type !== "client") {
       router.replace("/entrar");
       return;
     }
+    let alive = true;
+    const timer = window.setInterval(async () => {
+      // Refresco: si el coach cambió algo, se ve aquí a los segundos
+      if (!(await pullRemote())) return;
+      const fresh = loadClients().find((c) => c.id === session.clientId);
+      if (alive && fresh) {
+        setClient(fresh);
+        setMedia(getMedia());
+        setCoach(getCoachSettings());
+      }
+    }, 7000);
+    (async () => {
+    await pullRemote();
+    if (!alive) return;
     let found = loadClients().find((c) => c.id === session.clientId);
     if (!found) {
       logout();
@@ -81,6 +104,7 @@ export default function MiRutinaPage() {
     }
     setClient(found);
     setCoach(getCoachSettings());
+    setMedia(getMedia());
     setNotify(
       window.localStorage.getItem("fitevo:notify:v1") === "on" &&
         "Notification" in window &&
@@ -89,6 +113,11 @@ export default function MiRutinaPage() {
     // Queda premarcada la rutina que toca hoy (o la primera)
     setActiveRoutineId(routineForToday(found)?.id ?? null);
     setLoaded(true);
+    })();
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
   }, [router]);
 
   const active = useMemo(
@@ -675,7 +704,17 @@ export default function MiRutinaPage() {
                         : "border-graphite bg-coal"
                     }`}
                   >
-                    <MachinePhoto name={item.exercise.machine} index={i} compact />
+                    {media[item.exercise.id] &&
+                    mediaKind(media[item.exercise.id].url) === "image" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={media[item.exercise.id].url}
+                        alt={`Foto: ${item.exercise.name}`}
+                        className="aspect-square w-full border border-graphite object-cover sm:aspect-[4/3]"
+                      />
+                    ) : (
+                      <MachinePhoto name={item.exercise.machine} index={i} compact />
+                    )}
                     <div>
                       <p className="text-xs font-semibold tracking-[0.2em] text-blood uppercase">
                         {item.exercise.muscle}
@@ -688,6 +727,20 @@ export default function MiRutinaPage() {
                         {item.exercise.name}
                       </h3>
                       <p className="mt-1 text-sm text-steel">💡 {item.exercise.tip}</p>
+                      {media[item.exercise.id] && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMediaView({
+                              url: media[item.exercise.id].url,
+                              title: item.exercise.name,
+                            })
+                          }
+                          className="mt-2 border border-blood px-3 py-1.5 text-xs font-semibold tracking-widest text-blood uppercase transition-colors hover:bg-blood hover:text-chalk"
+                        >
+                          ▶ Ver cómo se hace
+                        </button>
+                      )}
                       <p className="mt-2 flex flex-wrap gap-x-4 text-sm">
                         <span>
                           <strong className="font-display text-lg text-blood">{item.sets}</strong>{" "}
@@ -885,6 +938,15 @@ export default function MiRutinaPage() {
           onClose={() => setPlanDay(null)}
           onPlanExisting={planExisting}
           onCreateOwn={createOwn}
+        />
+      )}
+
+      {/* Foto o video del ejercicio */}
+      {mediaView && (
+        <MediaModal
+          url={mediaView.url}
+          title={mediaView.title}
+          onClose={() => setMediaView(null)}
         />
       )}
 

@@ -98,6 +98,110 @@ export type Session =
 // v6: pack de clases con el coach + horario del coach
 const CLIENTS_KEY = "fitevo:clients:v6";
 const COACH_KEY = "fitevo:coach:v1";
+const MEDIA_KEY = "fitevo:media:v1";
+const STAMP_KEY = "fitevo:stamp:v1";
+
+/* ==== Sincronización en la nube ====
+   Los datos se comparten entre teléfonos vía un JSON compartido
+   (jsonblob.com, sin cuentas). Última escritura gana; localStorage
+   queda como caché y respaldo sin conexión. */
+const SYNC_URL =
+  "https://jsonblob.com/api/jsonBlob/019fbaa2-87f5-7ee9-8d8a-d4aa8d5f84c7";
+
+// Foto o video que el coach asocia a cada ejercicio del catálogo
+export type MediaMap = Record<string, { url: string }>;
+
+function getStamp(): number {
+  if (!isBrowser()) return 0;
+  return Number(window.localStorage.getItem(STAMP_KEY)) || 0;
+}
+function setStamp(value: number): void {
+  if (isBrowser()) window.localStorage.setItem(STAMP_KEY, String(value));
+}
+
+export function getMedia(): MediaMap {
+  if (!isBrowser()) return {};
+  try {
+    return JSON.parse(window.localStorage.getItem(MEDIA_KEY) ?? "{}") as MediaMap;
+  } catch {
+    return {};
+  }
+}
+
+export function saveMedia(media: MediaMap): void {
+  if (!isBrowser()) return;
+  window.localStorage.setItem(MEDIA_KEY, JSON.stringify(media));
+  scheduleSync();
+}
+
+let pushTimer: number | undefined;
+let pushing = false;
+let pushPending = false;
+
+// Marca los datos locales como "lo más nuevo" y sube en un momento
+export function scheduleSync(): void {
+  if (!isBrowser()) return;
+  setStamp(Date.now());
+  pushPending = true;
+  window.clearTimeout(pushTimer);
+  pushTimer = window.setTimeout(() => {
+    void pushRemote();
+  }, 700);
+}
+
+async function pushRemote(): Promise<void> {
+  if (!isBrowser()) return;
+  pushing = true;
+  pushPending = false;
+  try {
+    const body = JSON.stringify({
+      clients: JSON.parse(window.localStorage.getItem(CLIENTS_KEY) ?? "[]"),
+      coach: getCoachSettings(),
+      media: getMedia(),
+      stamp: getStamp(),
+    });
+    await fetch(SYNC_URL, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+  } catch {
+    // sin conexión: los datos quedan locales y se subirán al próximo cambio
+  }
+  pushing = false;
+}
+
+// Baja los datos de la nube si son más nuevos que los locales.
+// Devuelve true si algo cambió (para refrescar la pantalla).
+export async function pullRemote(): Promise<boolean> {
+  if (!isBrowser() || pushing || pushPending) return false;
+  try {
+    const response = await fetch(SYNC_URL, { cache: "no-store" });
+    const data = await response.json();
+    if (!data || !Array.isArray(data.clients)) return false;
+    if (!(typeof data.stamp === "number" && data.stamp > getStamp())) return false;
+    window.localStorage.setItem(CLIENTS_KEY, JSON.stringify(data.clients));
+    if (data.coach) window.localStorage.setItem(COACH_KEY, JSON.stringify(data.coach));
+    if (data.media) window.localStorage.setItem(MEDIA_KEY, JSON.stringify(data.media));
+    setStamp(data.stamp);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Qué tipo de medio es una URL (para mostrarla bien)
+export function mediaKind(url: string): "youtube" | "image" | "video" | "link" {
+  if (/(?:youtube\.com\/watch|youtu\.be\/|youtube\.com\/shorts)/.test(url)) return "youtube";
+  if (/\.(jpe?g|png|webp|gif|avif)(\?.*)?$/i.test(url)) return "image";
+  if (/\.(mp4|webm|mov)(\?.*)?$/i.test(url)) return "video";
+  return "link";
+}
+
+export function youtubeId(url: string): string | null {
+  const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([\w-]{6,})/);
+  return match ? match[1] : null;
+}
 const SESSION_KEY = "fitevo:session:v1";
 
 // Código del entrenador (en producción sería un usuario real)
@@ -515,6 +619,7 @@ export function loadClients(): StoredClient[] {
         const rotated = parsed.map(rotateWeek);
         if (JSON.stringify(rotated) !== raw) {
           window.localStorage.setItem(CLIENTS_KEY, JSON.stringify(rotated));
+          scheduleSync();
         }
         return rotated;
       }
@@ -533,6 +638,7 @@ export function loadClients(): StoredClient[] {
 export function saveClients(clients: StoredClient[]): void {
   if (!isBrowser()) return;
   window.localStorage.setItem(CLIENTS_KEY, JSON.stringify(clients));
+  scheduleSync();
 }
 
 export function getSession(): Session {
@@ -582,6 +688,7 @@ export function getCoachSettings(): CoachSettings {
 export function saveCoachSettings(settings: CoachSettings): void {
   if (!isBrowser()) return;
   window.localStorage.setItem(COACH_KEY, JSON.stringify(settings));
+  scheduleSync();
 }
 
 // Login por código: devuelve la sesión creada o null si el código no existe
