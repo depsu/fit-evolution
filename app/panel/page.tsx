@@ -1011,7 +1011,7 @@ export default function PanelPage() {
 }
 
 // Todas las rutinas del cliente: cuántas veces la hizo, cuándo fue la
-// última, edición directa y su historial de avances/ajustes
+// última, edición completa (valores, agregar y quitar ejercicios) y avances
 function RoutinesSection({
   client,
   media,
@@ -1030,11 +1030,16 @@ function RoutinesSection({
   );
   // Rutina cuyo modal de avances está abierto
   const [progressId, setProgressId] = useState<string | null>(null);
-  // Rutina en edición y sus valores temporales
+  // Rutina en edición: valores temporales + lista editable de ejercicios
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editItems, setEditItems] = useState<RoutineItem[]>([]);
   const [draft, setDraft] = useState<
     Map<string, { sets: number; reps: string; weight: string }>
   >(new Map());
+  // Buscador del "agregar ejercicio" dentro de la edición
+  const [addQuery, setAddQuery] = useState("");
+
+  const config = LEVEL_CONFIG[client.level];
 
   const startEditing = (savedRoutine: SavedRoutine) => {
     const next = new Map<string, { sets: number; reps: string; weight: string }>();
@@ -1046,6 +1051,8 @@ function RoutinesSection({
       });
     });
     setDraft(next);
+    setEditItems([...savedRoutine.routine.items]);
+    setAddQuery("");
     setEditingId(savedRoutine.id);
   };
 
@@ -1066,29 +1073,67 @@ function RoutinesSection({
     });
   };
 
+  // Quitar un ejercicio de la rutina en edición
+  const removeExercise = (exerciseId: string) => {
+    setEditItems((prev) => prev.filter((item) => item.exercise.id !== exerciseId));
+  };
+
+  // Agregar un ejercicio del catálogo (el caso "me faltó uno")
+  const addExercise = (exercise: Exercise) => {
+    setEditItems((prev) => [
+      ...prev,
+      { exercise, sets: config.sets, reps: config.reps, restSeconds: config.rest },
+    ]);
+    setDraft((prev) => {
+      const next = new Map(prev);
+      next.set(exercise.id, { sets: config.sets, reps: config.reps, weight: "" });
+      return next;
+    });
+    setAddQuery("");
+  };
+
   const saveEditing = (savedRoutine: SavedRoutine) => {
+    const before = savedRoutine.routine.items;
     const changes: string[] = [];
-    const items = savedRoutine.routine.items.map((item) => {
+    // Agregados y quitados
+    editItems.forEach((item) => {
+      if (!before.some((original) => original.exercise.id === item.exercise.id)) {
+        changes.push(`Agregó ${item.exercise.name}`);
+      }
+    });
+    before.forEach((original) => {
+      if (!editItems.some((item) => item.exercise.id === original.exercise.id)) {
+        changes.push(`Quitó ${original.exercise.name}`);
+      }
+    });
+    // Valores editados
+    const items = editItems.map((item) => {
       const values = draft.get(item.exercise.id);
       if (!values) return item;
       const weight = values.weight.trim() || undefined;
-      if (weight !== item.weight) {
-        changes.push(
-          `Cambió el peso de ${item.exercise.name}: ${item.weight ?? "—"} → ${weight ?? "—"}`
-        );
-      }
-      if (values.sets !== item.sets) {
-        changes.push(
-          `Cambió las series de ${item.exercise.name}: ${item.sets} → ${values.sets}`
-        );
-      }
-      if (values.reps !== item.reps) {
-        changes.push(
-          `Cambió las reps de ${item.exercise.name}: ${item.reps} → ${values.reps}`
-        );
+      const original = before.find(
+        (candidate) => candidate.exercise.id === item.exercise.id
+      );
+      if (original) {
+        if (weight !== original.weight) {
+          changes.push(
+            `Cambió el peso de ${item.exercise.name}: ${original.weight ?? "—"} → ${weight ?? "—"}`
+          );
+        }
+        if (values.sets !== original.sets) {
+          changes.push(
+            `Cambió las series de ${item.exercise.name}: ${original.sets} → ${values.sets}`
+          );
+        }
+        if (values.reps !== original.reps) {
+          changes.push(
+            `Cambió las reps de ${item.exercise.name}: ${original.reps} → ${values.reps}`
+          );
+        }
       }
       return { ...item, sets: values.sets, reps: values.reps, weight };
     });
+    if (items.length === 0) return; // una rutina no puede quedar vacía
     onEdit(savedRoutine.id, items, changes);
     setEditingId(null);
   };
@@ -1113,6 +1158,17 @@ function RoutinesSection({
         {client.routines.map((savedRoutine) => {
           const isOpen = savedRoutine.id === openId;
           const isEditing = savedRoutine.id === editingId;
+          const rows = isEditing ? editItems : savedRoutine.routine.items;
+          const addCandidates = isEditing
+            ? EXERCISES.filter(
+                (exercise) =>
+                  !editItems.some((item) => item.exercise.id === exercise.id) &&
+                  (!addQuery.trim() ||
+                    `${exercise.name} ${exercise.machine} ${exercise.muscle}`
+                      .toLowerCase()
+                      .includes(addQuery.toLowerCase()))
+              ).slice(0, 6)
+            : [];
           return (
             <li
               key={savedRoutine.id}
@@ -1159,7 +1215,7 @@ function RoutinesSection({
               {isOpen && (
                 <div className="border-t border-graphite">
                   <ul className="divide-y divide-graphite">
-                    {savedRoutine.routine.items.map((item, i) => {
+                    {rows.map((item, i) => {
                       const values = draft.get(item.exercise.id);
                       return (
                         <li key={item.exercise.id} className="p-3">
@@ -1177,7 +1233,7 @@ function RoutinesSection({
                                   ` · ${item.sets}×${item.reps}${item.weight ? ` · ${item.weight}` : ""} · ${item.restSeconds}s descanso`}
                               </span>
                             </span>
-                            {media[item.exercise.id] && (
+                            {!isEditing && media[item.exercise.id] && (
                               <button
                                 type="button"
                                 onClick={() =>
@@ -1189,9 +1245,21 @@ function RoutinesSection({
                                 ▶ Ver
                               </button>
                             )}
-                            <span className="hidden text-xs tracking-widest text-steel uppercase sm:block">
-                              {item.exercise.muscle}
-                            </span>
+                            {isEditing && (
+                              <button
+                                type="button"
+                                onClick={() => removeExercise(item.exercise.id)}
+                                className="shrink-0 px-2 py-1 text-xs font-semibold tracking-widest text-steel uppercase transition-colors hover:text-blood"
+                                aria-label={`Quitar ${item.exercise.name} de la rutina`}
+                              >
+                                Quitar ✕
+                              </button>
+                            )}
+                            {!isEditing && (
+                              <span className="hidden text-xs tracking-widest text-steel uppercase sm:block">
+                                {item.exercise.muscle}
+                              </span>
+                            )}
                           </div>
                           {isEditing && values && (
                             <div className="mt-2 flex flex-wrap items-end gap-3 pl-12">
@@ -1235,9 +1303,62 @@ function RoutinesSection({
                       );
                     })}
                   </ul>
+
+                  {/* Agregar el ejercicio que faltó */}
+                  {isEditing && (
+                    <div className="border-t border-graphite bg-ink p-3">
+                      <p className="text-xs font-semibold tracking-[0.3em] text-steel uppercase">
+                        ＋ Agregar ejercicio
+                      </p>
+                      <input
+                        type="search"
+                        value={addQuery}
+                        onChange={(event) => setAddQuery(event.target.value)}
+                        placeholder="🔍 Busca el que faltó: prensa, curl…"
+                        aria-label="Buscar ejercicio para agregar"
+                        className="mt-2 w-full border border-graphite bg-coal px-3 py-2 text-sm text-chalk placeholder:text-steel/50 focus:border-chalk/50 focus:outline-none"
+                      />
+                      <div className="mt-2 grid gap-1">
+                        {addCandidates.map((exercise) => (
+                          <button
+                            key={exercise.id}
+                            type="button"
+                            onClick={() => addExercise(exercise)}
+                            className="flex items-center gap-3 border border-transparent p-2 text-left text-sm transition-colors hover:border-graphite"
+                          >
+                            <span
+                              className="flex size-5 shrink-0 items-center justify-center border border-blood text-xs text-blood"
+                              aria-hidden
+                            >
+                              +
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate font-semibold">
+                                {exercise.name}
+                              </span>
+                              <span className="block truncate text-xs text-steel">
+                                {exercise.machine} · {exercise.muscle}
+                              </span>
+                            </span>
+                          </button>
+                        ))}
+                        {addCandidates.length === 0 && (
+                          <p className="p-2 text-xs text-steel">
+                            Nada con esa búsqueda (o ya están todos en la rutina).
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex flex-wrap items-center justify-end gap-2 border-t border-graphite p-2">
                     {isEditing ? (
                       <>
+                        {editItems.length === 0 && (
+                          <span className="mr-auto text-xs font-semibold text-blood">
+                            La rutina no puede quedar sin ejercicios.
+                          </span>
+                        )}
                         <button
                           type="button"
                           onClick={() => setEditingId(null)}
@@ -1247,8 +1368,9 @@ function RoutinesSection({
                         </button>
                         <button
                           type="button"
+                          disabled={editItems.length === 0}
                           onClick={() => saveEditing(savedRoutine)}
-                          className="bg-blood px-4 py-2 font-display text-base tracking-wider text-chalk uppercase transition-colors hover:bg-ember"
+                          className="bg-blood px-4 py-2 font-display text-base tracking-wider text-chalk uppercase transition-colors hover:bg-ember disabled:opacity-40"
                         >
                           Guardar cambios ✓
                         </button>
@@ -1307,6 +1429,7 @@ function RoutinesSection({
                 </h3>
                 <button
                   type="button"
+                  autoFocus
                   onClick={() => setProgressId(null)}
                   className="text-xs font-semibold tracking-widest text-steel uppercase transition-colors hover:text-blood"
                 >
