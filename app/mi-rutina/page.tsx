@@ -8,7 +8,8 @@ import { WeekHistoryModal } from "@/components/week-history-modal";
 import { ClientFileModal } from "@/components/client-file-modal";
 import { PlanDayModal } from "@/components/plan-day-modal";
 import { MediaModal } from "@/components/media-modal";
-import { DAY_NAMES, iconForRoutine, type Routine } from "@/lib/routine";
+import { EditRoutineModal } from "@/components/edit-routine-modal";
+import { DAY_NAMES, iconForRoutine, type Routine, type RoutineItem } from "@/lib/routine";
 import { useEscape } from "@/lib/use-escape";
 import {
   getCoachSettings,
@@ -58,11 +59,14 @@ export default function MiRutinaPage() {
   // Fotos/videos de ejercicios (los pone el coach en su Biblioteca)
   const [media, setMedia] = useState<MediaMap>({});
   const [mediaView, setMediaView] = useState<{ url: string; title: string } | null>(null);
+  // Editor de la rutina activa (agregar/quitar ejercicios, peso…)
+  const [editOpen, setEditOpen] = useState(false);
 
   // Cerrar modales con Escape
   useEscape(!!dayLog, () => setDayLog(null));
   useEscape(planDay !== null, () => setPlanDay(null));
   useEscape(!!mediaView, () => setMediaView(null));
+  useEscape(editOpen, () => setEditOpen(false));
   useEscape(historyOpen, () => setHistoryOpen(false));
   useEscape(fileOpen, () => setFileOpen(false));
 
@@ -359,6 +363,46 @@ export default function MiRutinaPage() {
         { dateLabel: todayISO(), weightKg },
       ],
     });
+  };
+
+  // Guarda la edición de la rutina activa; los cambios quedan anotados
+  // como ajustes del cliente (el coach los ve en "Ver avances")
+  const saveEdit = (items: RoutineItem[], changes: string[]) => {
+    if (!client || !active) return;
+    persist({
+      ...client,
+      routines: client.routines.map((saved) =>
+        saved.id === active.id
+          ? {
+              ...saved,
+              routine: { ...saved.routine, items },
+              adjustments: [
+                ...saved.adjustments,
+                ...changes.map((text) => ({
+                  dateLabel: todayISO(),
+                  by: "cliente" as const,
+                  text,
+                })),
+              ],
+            }
+          : saved
+      ),
+    });
+    setEditOpen(false);
+  };
+
+  // Eliminar una rutina propia (las del coach las elimina el coach)
+  const deleteActive = () => {
+    if (!client || !active) return;
+    if (
+      !window.confirm(
+        `¿Eliminar “${active.routine.title}”? Esta acción no se puede deshacer.`
+      )
+    )
+      return;
+    const routines = client.routines.filter((saved) => saved.id !== active.id);
+    persist({ ...client, routines });
+    setActiveRoutineId(routines[0]?.id ?? null);
   };
 
   const exit = () => {
@@ -670,6 +714,25 @@ export default function MiRutinaPage() {
               </p>
             </div>
 
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setEditOpen(true)}
+                className="border border-graphite px-3 py-2 text-xs font-semibold tracking-widest text-steel uppercase transition-colors hover:border-blood hover:text-blood"
+              >
+                ✏️ Editar rutina
+              </button>
+              {active.createdBy === "cliente" && (
+                <button
+                  type="button"
+                  onClick={deleteActive}
+                  className="px-3 py-2 text-xs font-semibold tracking-widest text-steel uppercase transition-colors hover:text-blood"
+                >
+                  Eliminar ✕
+                </button>
+              )}
+            </div>
+
             <p className="mt-4 border-l-2 border-blood bg-coal px-4 py-3 text-sm text-steel">
               💡 Toca <strong className="text-chalk">“Marcar”</strong> cuando termines
               cada ejercicio. Tu coach ve tu avance al instante.
@@ -938,6 +1001,17 @@ export default function MiRutinaPage() {
           onClose={() => setPlanDay(null)}
           onPlanExisting={planExisting}
           onCreateOwn={createOwn}
+        />
+      )}
+
+      {/* Editor de la rutina activa */}
+      {editOpen && active && (
+        <EditRoutineModal
+          title={active.routine.title}
+          items={active.routine.items}
+          level={client.level}
+          onSave={saveEdit}
+          onClose={() => setEditOpen(false)}
         />
       )}
 
