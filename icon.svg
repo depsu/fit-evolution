@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" fill="#0a0a0a"/>
+  <path d="M0 46 L18 64 L6 64 L0 58 Z M14 46 L32 64 L20 64 L2 46 Z M28 46 L46 64 L34 64 L16 46 Z" fill="#e10600" opacity="0.9"/>
+  <text x="32" y="40" font-family="Arial Black, sans-serif" font-size="30" font-weight="900" fill="#f2efe9" text-anchor="middle">FE</text>
+  <rect x="8" y="8" width="10" height="4" fill="#e10600"/>
+</svg>
